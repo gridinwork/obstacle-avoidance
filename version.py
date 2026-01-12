@@ -1,2 +1,2 @@
-VERSION = "68"
+VERSION = "74-RU"
 
