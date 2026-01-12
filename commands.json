@@ -1,45 +1,38 @@
 {
-  "move_forward": {
-    "description": "Move the vehicle forward using either distance in meters or time in seconds.",
-    "required": ["speed", "distance_m", "time_s"],
-    "parameters": {
-      "speed": "Forward velocity in m/s.",
-      "distance_m": "Distance in meters (optional if time_s is provided).",
-      "time_s": "Duration in seconds (optional if distance_m is provided)."
-    }
+  "forward": {
+    "type": "move",
+    "direction": "forward",
+    "speed": 20,
+    "description": "Move forward at specified speed percentage"
   },
-
-  "move_backward": {
-    "description": "Move the vehicle backward by using negative MAVLink velocity.",
-    "required": ["speed", "distance_m", "time_s"],
-    "parameters": {
-      "speed": "Backward velocity (positive number).",
-      "distance_m": "Distance in meters.",
-      "time_s": "Duration in seconds."
-    }
+  "backward": {
+    "type": "move",
+    "direction": "backward",
+    "speed": 15,
+    "description": "Move backward at specified speed percentage"
   },
-
-  "turn_left": {
-    "description": "Rotate left around yaw axis by a specified angle.",
-    "required": ["angle_deg", "turn_speed_deg"],
-    "parameters": {
-      "angle_deg": "Angle to rotate, in degrees.",
-      "turn_speed_deg": "Yaw rotation speed in degrees per second."
-    }
+  "left": {
+    "type": "turn",
+    "direction": "left",
+    "description": "Turn left (ENABLE ON, REVERSE OFF, STEERING LEFT, THROTTLE MIN)"
   },
-
-  "turn_right": {
-    "description": "Rotate right around yaw axis by a specified angle.",
-    "required": ["angle_deg", "turn_speed_deg"],
-    "parameters": {
-      "angle_deg": "Angle to rotate, in degrees.",
-      "turn_speed_deg": "Yaw rotation speed in degrees per second."
-    }
+  "right": {
+    "type": "turn",
+    "direction": "right",
+    "description": "Turn right (ENABLE ON, REVERSE OFF, STEERING RIGHT, THROTTLE MIN)"
   },
-
   "stop": {
-    "description": "Stop all motion WITHOUT disarming motors.",
-    "required": [],
-    "parameters": {}
+    "type": "stop",
+    "description": "Stop all movement (ENABLE OFF, THROTTLE MIN, STEERING CENTER)"
+  },
+  "arm": {
+    "type": "system",
+    "action": "arm",
+    "description": "Arm the vehicle (RC7 = 1900)"
+  },
+  "disarm": {
+    "type": "system",
+    "action": "disarm",
+    "description": "Disarm the vehicle (RC7 = 1100)"
   }
 }

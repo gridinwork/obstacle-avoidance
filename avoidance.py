@@ -1,4 +1,5 @@
-"""Obstacle avoidance logic driven by LiDAR point cloud."""
+"""Obstacle avoidance logic driven by LiDAR point cloud.
+Version 76: Clean RC-override-only model, no GPS/compass/angle-based movement."""
 
 from __future__ import annotations
 
@@ -15,11 +16,11 @@ from shared_data import Point, SharedData
 from settings import Settings
 from mavlink_comm import MavlinkComm
 from motion_control import MotionControl
-from mavlink_motion_commands import MavlinkMotionCommands
+from config import ROTATION_TIME_SEC, FORWARD_TIME_SEC, SPEED_CAP_PERCENT
 
 
 class AvoidanceController(QtCore.QObject):
-    """Three-zone obstacle avoidance (v23)."""
+    """Three-zone obstacle avoidance using time-based RC override commands only."""
 
     statusChanged = QtCore.pyqtSignal(str)
 
@@ -47,21 +48,12 @@ class AvoidanceController(QtCore.QObject):
         self._side_counts: tuple[int, int] = (0, 0)
         self._last_status_emit_ts: float = 0.0
         self._last_command_ts: float = 0.0
-        self._last_status_emit_ts: float = 0.0
-        self._last_command_ts: float = 0.0
         self._zone_entry_ts: float = 0.0
         self._last_min_dist: float = float("inf")
         self._dwell_required_sec: float = 0.5
         self._last_check_ts: float = 0.0
         self._last_mode_change_ts: float = 0.0
         self._last_dir_change_ts: float = 0.0
-        # Initialize MAVLink motion command executor
-        self.motion_commands = MavlinkMotionCommands(
-            mav_connection=mav.master,
-            movement_coefficient=shared.movement_coefficient,
-            gps_available=shared.gps_fix,
-            log_fn=log_fn,
-        )
 
     # Lifecycle -----------------------------------------------------------------
     def start(self) -> None:
@@ -89,22 +81,18 @@ class AvoidanceController(QtCore.QObject):
                 continue
             self._last_check_ts = now_global
 
-            # Respect action lockout: do not analyze or issue new commands.
+            # Respect action lockout: do not analyze or issue new commands during maneuvers
             if self.shared.action_in_progress:
                 remaining = self.shared.action_end_time - time.time()
                 if remaining > 0:
                     label = self.shared.action_label or "Action in progress"
-                    # Passive sensing allowed; no commands or state changes.
-                    points = self.shared.get_validated_lidar_points() or self.shared.get_lidar_points()
-                    if points:
-                        min_dist, left_count, right_count = self._analyze_points(points)
-                        self.shared.update_status(last_obstacle_cm=min_dist)
-                        self._side_counts = (left_count, right_count)
-                    self._emit_status(f"{label} — action lockout active ({remaining:.1f}s remaining)")
+                    # Skip LIDAR processing during maneuvers
+                    self._emit_status(f"{label} — LIDAR scanning paused ({remaining:.1f}s remaining)")
                     time.sleep(0.05)
                     continue
+                # Maneuver finished, resume LIDAR scanning
                 self.shared.update_status(action_in_progress=False, action_end_time=0.0, action_label="")
-                self._emit_status("Rechecking obstacle after maneuver…")
+                self._emit_status("Maneuver finished — LIDAR scanning resumed")
                 time.sleep(0.05)
                 continue
 
@@ -182,23 +170,23 @@ class AvoidanceController(QtCore.QObject):
         self._executing = False
         if self._can_command():
             self._restore_previous_mode(target_mode)
-            self.mav.release_rc_override("post-avoidance clear")
 
     def _handle_green(self) -> None:
+        """Green zone: obstacle detected but far enough, continue normal operation."""
         now = time.time()
         if (now - self._last_mode_change_ts) < 0.5:
             return
         self._last_mode_change_ts = now
         self.state = "green"
         msg = (
-            f"GREEN ZONE — Preparing avoidance {self.selected_direction} "
+            f"GREEN ZONE — Obstacle detected but clear "
             f"(Side: L={self._side_counts[0]} R={self._side_counts[1]})"
         )
         self._emit_status(msg)
-        # Do not switch to GUIDED; gently reduce speed.
-        self._apply_speed(percent_of_base=70.0, allow_command=self._can_command())
+        # No movement commands in green zone - let normal mission continue
 
     def _handle_yellow(self) -> None:
+        """Yellow zone: execute timed turn and forward movement maneuver."""
         if self._executing or self.shared.action_in_progress:
             return
         now = time.time()
@@ -208,43 +196,61 @@ class AvoidanceController(QtCore.QObject):
         self._executing = True
         self.state = "yellow"
         turn_dir = self.selected_direction
-        self._emit_status(f"YELLOW ZONE — Turning {turn_dir} 90° with 25% speed cap")
+        
         if not self._can_command():
             self._executing = False
             return
+        
+        # Calculate total maneuver time
+        total_time = ROTATION_TIME_SEC + FORWARD_TIME_SEC + 0.5  # Add buffer
+        
+        # STOP LIDAR scanning during maneuver
+        self.shared.update_status(
+            action_in_progress=True,
+            action_end_time=time.time() + total_time,
+            action_label="YELLOW ZONE maneuver in progress"
+        )
+        
+        # Clear LIDAR points to prevent processing during maneuver
+        with self.shared.lidar_lock:
+            self.shared.set_lidar_points([])
+            self.shared.set_validated_lidar_points([])
+        
         self._remember_mode_before_guided()
         self.mav.ensure_guided()
         
-        # Update motion commands with latest settings
-        self.motion_commands.movement_coefficient = self.shared.movement_coefficient
-        self.motion_commands.gps_available = self.shared.gps_fix
+        # Sync connection if needed
+        if self.motion.movement_controller.connection is None and self.mav.master:
+            self.motion.movement_controller.connection = self.mav.master
         
-        # Turn using MAVLink command
-        angle_deg = 90.0
-        if turn_dir == "RIGHT":
-            command = {
-                "command": "turn_right",
-                "params": {
-                    "angle_deg": angle_deg,
-                    "turn_speed_deg": 30.0,
-                },
-            }
-        else:
-            command = {
-                "command": "turn_left",
-                "params": {
-                    "angle_deg": angle_deg,
-                    "turn_speed_deg": 30.0,
-                },
-            }
-        self.motion_commands.execute(command)
-        
-        # Drive forward until obstacle is no longer in yellow/red, then restore mode.
-        self._drive_until_clear()
-        self._restore_previous_mode()
-        self._executing = False
+        try:
+            # Execute timed maneuver based on obstacle side
+            if turn_dir == "RIGHT":
+                # Obstacle on left side -> turn RIGHT
+                self._emit_status("YELLOW ZONE — Turning RIGHT (timed)")
+                self.motion.movement_controller.timed_turn_right(ROTATION_TIME_SEC, SPEED_CAP_PERCENT)
+            else:
+                # Obstacle on right side -> turn LEFT
+                self._emit_status("YELLOW ZONE — Turning LEFT (timed)")
+                self.motion.movement_controller.timed_turn_left(ROTATION_TIME_SEC, SPEED_CAP_PERCENT)
+            
+            # After turn, move forward for a timed duration
+            self.motion.movement_controller.forward_for(FORWARD_TIME_SEC, SPEED_CAP_PERCENT)
+            
+            # Stop after forward movement
+            self.motion.movement_controller.stop()
+            
+        except Exception as exc:
+            self.log(f"Yellow zone maneuver failed: {exc}")
+            self.motion.movement_controller.stop()
+        finally:
+            # Resume LIDAR scanning after maneuver
+            self.shared.update_status(action_in_progress=False, action_end_time=0.0, action_label="")
+            self._restore_previous_mode()
+            self._executing = False
 
     def _handle_red(self) -> None:
+        """Red zone: stop and reverse."""
         if self._executing or self.shared.action_in_progress:
             return
         now = time.time()
@@ -257,11 +263,16 @@ class AvoidanceController(QtCore.QObject):
         if prev_state == "red":
             self._emit_status("Obstacle still in RED zone — repeating reverse")
         else:
-            self._emit_status("RED ZONE — STOPPING then REVERSE until yellow")
+            self._emit_status("RED ZONE — STOPPING then REVERSE")
         if not self._can_command():
             self._executing = False
             return
-        self._smooth_stop()
+        
+        # Stop first
+        if self.motion.movement_controller.connection is None and self.mav.master:
+            self.motion.movement_controller.connection = self.mav.master
+        self.motion.movement_controller.stop()
+        
         self._remember_mode_before_guided()
         self.mav.ensure_guided()
         self._reverse_until_yellow()
@@ -302,7 +313,6 @@ class AvoidanceController(QtCore.QObject):
         executed = self._run_command(f"Return to {desired_mode}", restore_fn)
         if executed:
             self.shared.update_status(pre_avoidance_mode=None)
-            self.mav.release_rc_override("mode restore")
 
     def _emit_status(self, message: str) -> None:
         now = time.time()
@@ -315,6 +325,8 @@ class AvoidanceController(QtCore.QObject):
             or message.startswith("YELLOW ZONE")
             or message.startswith("RED ZONE")
             or message.startswith("Obstacle still in RED")
+            or "maneuver" in message.lower()
+            or "LIDAR" in message
         )
         if not allowed:
             return
@@ -334,6 +346,7 @@ class AvoidanceController(QtCore.QObject):
             self._emit_status("")
 
     def _analyze_points(self, points: Iterable[Point]) -> tuple[float, int, int]:
+        """Analyze LIDAR points to determine minimum distance and side counts."""
         min_dist = self._min_distance_corridor(points)
         left = 0
         right = 0
@@ -350,6 +363,7 @@ class AvoidanceController(QtCore.QObject):
         return min_dist, left, right
 
     def _pick_direction(self, left_count: int, right_count: int) -> str:
+        """Pick turn direction based on obstacle side counts."""
         now = time.time()
         if left_count > right_count:
             choice = "RIGHT"
@@ -364,64 +378,17 @@ class AvoidanceController(QtCore.QObject):
             self._emit_status(f"Side check: Left={left_count} Right={right_count} → turning {choice}")
         return getattr(self, "selected_direction", choice)
 
-    def _apply_speed(self, base_mode: bool = False, percent_of_base: float | None = None, allow_command: bool = True) -> None:
-        """Apply speed using MAVLink commands instead of RC override."""
-        if not allow_command or not self._can_command():
-            return
-        
-        # Update motion commands with latest settings
-        self.motion_commands.movement_coefficient = self.shared.movement_coefficient
-        self.motion_commands.gps_available = self.shared.gps_fix
-        
-        if base_mode or percent_of_base is None:
-            percent_of_base = 100.0
-        
-        # Convert percentage to m/s
-        speed_mps = (percent_of_base / 100.0) * 0.6
-        
-        if self._command_cooldown_passed():
-            command = {
-                "command": "move_forward",
-                "params": {
-                    "speed": speed_mps,
-                    "distance_m": None,
-                    "time_s": 0.5,  # Short forward movement
-                },
-            }
-            self.motion_commands.execute(command)
-            self._last_command_ts = time.time()
-        
-        movement = "MOVING" if percent_of_base > 5.0 else "STOPPED"
-        self.shared.update_status(movement_state=movement)
-
-    def _throttle_from_base(self, percent_of_base: float) -> int:
-        """Convert percent-of-base speed to PWM (clamped 1000–2000)."""
-        base_pwm = max(1000, min(int(self.shared.base_speed_pwm), 2000))
-        span = max(1, base_pwm - 1000)
-        target_pwm = int(1000 + span * (max(0.0, min(100.0, percent_of_base)) / 100.0))
-        return max(1000, min(2000, target_pwm))
-
-    def _smooth_stop(self) -> None:
-        """Stop movement using MAVLink stop command."""
-        if not self._can_command():
-            return
-        # Use MAVLink stop command (no RC override)
-        self.motion.stop_vehicle()
-
     def _reverse_until_yellow(self) -> None:
         """Reverse until the obstacle exits the red zone (enters yellow/green) or timeout."""
         if not self._can_command():
             return
         
-        # Update motion commands with latest settings
-        self.motion_commands.movement_coefficient = self.shared.movement_coefficient
-        self.motion_commands.gps_available = self.shared.gps_fix
-        
         reverse_pct = max(0.0, min(getattr(self.settings, "speed_limit3_pct", 40), 100))
-        reverse_speed_mps = (reverse_pct / 100.0) * 0.4
         max_reverse = max(1.0, float(self.shared.reverse_duration_sec or 0.0))
         deadline = time.time() + max_reverse
         label = "RED ZONE — reversing until yellow"
+        
+        # Pause LIDAR during reverse
         self.shared.update_status(
             action_in_progress=True,
             action_end_time=deadline,
@@ -429,101 +396,46 @@ class AvoidanceController(QtCore.QObject):
             movement_state="REVERSING",
         )
         self._emit_status(label)
+        
+        # Clear LIDAR points
+        with self.shared.lidar_lock:
+            self.shared.set_lidar_points([])
+            self.shared.set_validated_lidar_points([])
+        
         try:
-            # Use MAVLink backward command with time-based movement
-            command = {
-                "command": "move_backward",
-                "params": {
-                    "speed": reverse_speed_mps,
-                    "distance_m": None,
-                    "time_s": max_reverse,
-                },
-            }
-            self.motion_commands.execute(command)
+            # Sync connection if needed
+            if self.motion.movement_controller.connection is None and self.mav.master:
+                self.motion.movement_controller.connection = self.mav.master
             
-            # Monitor obstacle distance while reversing
+            if self.motion.movement_controller.connection:
+                # Use timed backward movement
+                self.motion.movement_controller.backward_for(max_reverse, reverse_pct)
+            
+            # Monitor obstacle distance while reversing (using last known points)
             while time.time() < deadline and self.shared.running:
-                current = self._current_min_distance()
-                if current > self.RED_LINE_CM:
-                    self._emit_status("RED ZONE — exited red, now yellow/clear")
-                    break
+                # Check if we can get new points (after pause ends)
+                if not self.shared.action_in_progress:
+                    points = self.shared.get_validated_lidar_points() or self.shared.get_lidar_points()
+                    if points:
+                        current = self._current_min_distance_from_points(points)
+                        if current > self.RED_LINE_CM:
+                            self._emit_status("RED ZONE — exited red, now yellow/clear")
+                            break
                 if not self._can_command():
                     break
                 time.sleep(0.1)
         finally:
-            self.motion.stop_vehicle()
+            self.motion.movement_controller.stop()
             self.shared.update_status(action_in_progress=False, action_end_time=0.0, action_label="")
-
-    def _drive_until_clear(self, timeout_sec: float = 8.0) -> None:
-        """Drive forward using MAVLink commands until obstacle is clear of yellow."""
-        if not self._can_command():
-            return
-        
-        # Update motion commands with latest settings
-        self.motion_commands.movement_coefficient = self.shared.movement_coefficient
-        self.motion_commands.gps_available = self.shared.gps_fix
-        
-        deadline = time.time() + max(1.0, timeout_sec)
-        label = "YELLOW ZONE — driving around obstacle"
-        self.shared.update_status(action_in_progress=True, action_end_time=deadline, action_label=label)
-        self._emit_status(label)
-        
-        # Use reduced speed (25% of base)
-        speed_mps = 0.15  # Reduced speed for obstacle avoidance
-        
-        try:
-            while time.time() < deadline and self.shared.running:
-                current = self._current_min_distance()
-                if current > self.GREEN_THRESHOLD_CM:
-                    self._emit_status("YELLOW ZONE — obstacle cleared")
-                    break
-                if not self._can_command():
-                    break
-                
-                # Send forward movement command
-                command = {
-                    "command": "move_forward",
-                    "params": {
-                        "speed": speed_mps,
-                        "distance_m": None,
-                        "time_s": 0.2,  # Short duration, will be repeated
-                    },
-                }
-                self.motion_commands.execute(command)
-                time.sleep(0.2)
-        finally:
-            self.motion.stop_vehicle()
-            self.shared.update_status(action_in_progress=False, action_end_time=0.0, action_label="")
-
-    def _forward_until_clear(self) -> None:
-        """Drive forward using MAVLink commands until clear."""
-        if not self._can_command():
-            return
-        
-        # Update motion commands with latest settings
-        self.motion_commands.movement_coefficient = self.shared.movement_coefficient
-        self.motion_commands.gps_available = self.shared.gps_fix
-        
-        deadline = time.time() + 6.0
-        while time.time() < deadline and self.shared.running:
-            current = self._current_min_distance()
-            if current > self.GREEN_THRESHOLD_CM:
-                break
-            
-            command = {
-                "command": "move_forward",
-                "params": {
-                    "speed": 0.35,
-                    "distance_m": 0.5,
-                    "time_s": None,
-                },
-            }
-            self.motion_commands.execute(command)
-            time.sleep(0.3)
 
     def _current_min_distance(self) -> float:
+        """Get current minimum distance from LIDAR points."""
         pts = self.shared.get_validated_lidar_points() or self.shared.get_lidar_points()
         return self._min_distance_corridor(pts)
+
+    def _current_min_distance_from_points(self, points: Iterable[Point]) -> float:
+        """Get minimum distance from provided points."""
+        return self._min_distance_corridor(points)
 
     def _min_distance_corridor(self, points: Iterable[Point]) -> float:
         """Only consider obstacles inside the Primary Forward Corridor (blue lines)."""
@@ -542,29 +454,27 @@ class AvoidanceController(QtCore.QObject):
         return min_dist
 
     def _to_xy(self, ang_deg: float, dist_cm: float) -> Tuple[float, float]:
+        """Convert angle and distance to x,y coordinates (for obstacle detection only, not movement)."""
         rad = math.radians(ang_deg)
         x_cm = dist_cm * math.sin(rad)
         y_cm = dist_cm * math.cos(rad)
         return x_cm, y_cm
 
     def _is_front(self, ang_deg: float) -> bool:
+        """Check if angle is in front sector."""
         return -90.0 <= ang_deg <= 90.0
 
     def _can_command(self) -> bool:
+        """Check if MAVLink commands can be sent."""
         return bool(self.shared.mav_connected)
 
-    # Action lock helpers -------------------------------------------------------
-    def _lock_action(self, duration_sec: float, label: str) -> None:
-        duration = max(0.0, float(duration_sec))
-        end_time = time.time() + duration
-        self.shared.update_status(action_in_progress=True, action_end_time=end_time, action_label=label)
-        self._emit_status(label)
-
     def _command_cooldown_passed(self) -> bool:
+        """Check if command cooldown period has passed."""
         gap = max(2.0, float(self.shared.command_cooldown_sec or 0.0))
         return (time.time() - self._last_command_ts) >= gap
 
     def _run_command(self, label: str, fn) -> bool:
+        """Execute a command with cooldown check."""
         if not self._command_cooldown_passed():
             return False
         try:
@@ -574,4 +484,3 @@ class AvoidanceController(QtCore.QObject):
             ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self._last_command_ts))
             self.log(f"{ts} {label}")
         return True
-

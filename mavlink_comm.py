@@ -9,6 +9,7 @@ from typing import Callable, Optional
 
 from settings import Settings
 from shared_data import SharedData
+from mavlink_controller import MavlinkController
 
 try:
     from pymavlink import mavutil
@@ -30,6 +31,8 @@ class MavlinkComm:
         self.master: Optional[mavutil.mavlink_connection] = None
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        # Initialize MAVLink controller - ensures connection is ALWAYS available
+        self.controller = MavlinkController(log_fn=log_fn)
 
     # Public API -----------------------------------------------------------------
     def start(self) -> None:
@@ -382,14 +385,17 @@ class MavlinkComm:
                 for port in ports_to_try:
                     try:
                         self.log(f"Connecting MAVLink on {port} @ {baud}")
-                        master = mavutil.mavlink_connection(port, baud=baud)
-                        master.wait_heartbeat(timeout=5)
-                        self.master = master
-                        self.settings.set("mavlink_port", port)
-                        self.shared.update_status(mav_connected=True, mav_status="connected", mav_error="")
-                        self.log(f"MAVLink connected on {port}")
-                        connected = True
-                        break
+                        # Use controller to ensure connection is properly initialized
+                        master = self.controller.connect_mavlink(port, baud)
+                        if master:
+                            self.master = master
+                            self.controller.connection = master  # Keep controller in sync
+                            self.controller.gps_available = self.shared.gps_fix  # Sync GPS status
+                            self.settings.set("mavlink_port", port)
+                            self.shared.update_status(mav_connected=True, mav_status="connected", mav_error="")
+                            self.log(f"MAVLink connected on {port}")
+                            connected = True
+                            break
                     except Exception as exc_inner:
                         last_exc = exc_inner
                         self.log(f"MAVLink attempt failed on {port}: {exc_inner}")
@@ -397,6 +403,14 @@ class MavlinkComm:
 
                 if not connected:
                     raise last_exc or RuntimeError("Pixhawk not detected on UART")
+
+                # Ensure controller connection is synced
+                if self.master:
+                    self.controller.connection = self.master
+                    self.controller.gps_available = self.shared.gps_fix
+                    # Also sync movement controller if it exists (will be set by MotionControl)
+                    if hasattr(self, 'movement_controller'):
+                        self.movement_controller.connection = self.master
 
                 self._listen_loop()
             except PermissionError as exc:
@@ -446,6 +460,12 @@ class MavlinkComm:
             if msg is None:
                 time.sleep(0.05)
                 continue
+            
+            # Update controller GPS status
+            if msg.get_type() == "GPS_RAW_INT":
+                self.controller.gps_available = (msg.fix_type >= 2)
+                self.shared.update_status(gps_fix=self.controller.gps_available)
+            
             mtype = msg.get_type()
             if mtype == "BAD_DATA":
                 continue

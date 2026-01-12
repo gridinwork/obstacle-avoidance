@@ -17,6 +17,9 @@ try:
 except Exception:
     mavutil = None
 
+from mavlink_controller import MavlinkController
+from config import GPS_SPEED_FACTOR
+
 
 class MavlinkMotionCommands:
     """Execute MAVLink motion commands based on JSON command definitions."""
@@ -25,22 +28,33 @@ class MavlinkMotionCommands:
         self,
         mav_connection,
         commands_file: str | Path | None = None,
-        movement_coefficient: float = 1.0,
+        movement_coefficient: float = None,
         gps_available: bool = False,
         log_fn: Callable[[str], None] = print,
+        controller: Optional[MavlinkController] = None,
     ) -> None:
         """
         Initialize the motion command executor.
 
         Args:
-            mav_connection: MAVLink connection object (mavutil.mavlink_connection)
+            mav_connection: MAVLink connection object (mavutil.mavlink_connection) - kept for compatibility
             commands_file: Path to commands.json file (default: commands.json in same directory)
-            movement_coefficient: Seconds per meter for no-GPS mode (default: 1.0)
+            movement_coefficient: Seconds per meter for no-GPS mode (default: GPS_SPEED_FACTOR from config)
             gps_available: Whether GPS fix is available
             log_fn: Logging function
+            controller: MavlinkController instance (preferred over mav_connection)
         """
-        self.mav = mav_connection
-        self.movement_coefficient = movement_coefficient
+        # Use controller if provided, otherwise create one
+        if controller:
+            self.controller = controller
+        else:
+            self.controller = MavlinkController(log_fn=log_fn)
+            if mav_connection:
+                self.controller.connection = mav_connection
+        
+        # Keep mav for backward compatibility
+        self.mav = self.controller.connection or mav_connection
+        self.movement_coefficient = movement_coefficient if movement_coefficient is not None else GPS_SPEED_FACTOR
         self.gps_available = gps_available
         self.log = log_fn
 
@@ -69,9 +83,14 @@ class MavlinkMotionCommands:
         Returns:
             True if command executed successfully, False otherwise
         """
-        if not self.mav:
-            self.log("MAVLink connection not available")
-            return False
+        # Use controller to check connection
+        if not self.controller.check_connection():
+            # Try to update connection from mav if available
+            if self.mav:
+                self.controller.connection = self.mav
+            if not self.controller.check_connection():
+                self.log("MAVLink connection not available")
+                return False
 
         command_name = command_dict.get("command")
         params = command_dict.get("params", {})
@@ -117,42 +136,22 @@ class MavlinkMotionCommands:
         Returns:
             True if command executed successfully
         """
-        if mavutil is None or not self.mav:
+        # Use controller for movement
+        if not self.controller.check_connection():
             self.log("Move forward skipped: MAVLink not connected")
             return False
 
         try:
-            # Determine movement duration
-            if time_s is not None:
-                duration = time_s
-            elif distance_m is not None:
-                if self.gps_available:
-                    # GPS available: use distance directly
-                    duration = abs(distance_m) / max(0.1, speed)
-                else:
-                    # No GPS: convert distance to time using coefficient
-                    duration = abs(distance_m) * self.movement_coefficient
-                    self.log(f"GPS unavailable: {distance_m}m -> {duration:.2f}s (coeff={self.movement_coefficient})")
-            else:
-                # Default: 1 second
-                duration = 1.0
-
-            # Ensure GUIDED mode
-            self._ensure_guided_mode()
-
-            # Execute velocity-based forward movement
-            end_time = time.time() + duration
-            speed = max(0.05, min(speed, 5.0))  # Clamp speed
-
-            while time.time() < end_time:
-                self._send_velocity_target(vx=speed, vy=0.0, vz=0.0)
-                time.sleep(0.2)  # 5Hz command rate
-
-            # Stop by sending zero velocity
-            self._send_velocity_target(vx=0.0, vy=0.0, vz=0.0)
-            self.log(f"Move forward completed: {duration:.2f}s @ {speed} m/s")
-            return True
-
+            # Update GPS status
+            self.controller.gps_available = self.gps_available
+            self.controller.gps_speed_factor = self.movement_coefficient
+            
+            # Use controller's send_forward method
+            return self.controller.send_forward(
+                distance_m=distance_m,
+                speed=speed,
+                time_s=time_s
+            )
         except Exception as exc:
             self.log(f"Move forward failed: {exc}")
             return False
@@ -174,39 +173,22 @@ class MavlinkMotionCommands:
         Returns:
             True if command executed successfully
         """
-        if mavutil is None or not self.mav:
+        # Use controller for movement
+        if not self.controller.check_connection():
             self.log("Move backward skipped: MAVLink not connected")
             return False
 
         try:
-            # Determine movement duration
-            if time_s is not None:
-                duration = time_s
-            elif distance_m is not None:
-                if self.gps_available:
-                    duration = abs(distance_m) / max(0.1, speed)
-                else:
-                    duration = abs(distance_m) * self.movement_coefficient
-                    self.log(f"GPS unavailable: {distance_m}m -> {duration:.2f}s (coeff={self.movement_coefficient})")
-            else:
-                duration = 1.0
-
-            # Ensure GUIDED mode
-            self._ensure_guided_mode()
-
-            # Execute velocity-based backward movement (negative vx)
-            end_time = time.time() + duration
-            speed = max(0.05, min(speed, 5.0))  # Clamp speed
-
-            while time.time() < end_time:
-                self._send_velocity_target(vx=-speed, vy=0.0, vz=0.0)
-                time.sleep(0.2)  # 5Hz command rate
-
-            # Stop by sending zero velocity
-            self._send_velocity_target(vx=0.0, vy=0.0, vz=0.0)
-            self.log(f"Move backward completed: {duration:.2f}s @ {speed} m/s")
-            return True
-
+            # Update GPS status
+            self.controller.gps_available = self.gps_available
+            self.controller.gps_speed_factor = self.movement_coefficient
+            
+            # Use controller's send_reverse method
+            return self.controller.send_reverse(
+                distance_m=distance_m,
+                speed=speed,
+                time_s=time_s
+            )
         except Exception as exc:
             self.log(f"Move backward failed: {exc}")
             return False
@@ -226,31 +208,17 @@ class MavlinkMotionCommands:
         Returns:
             True if command executed successfully
         """
-        if mavutil is None or not self.mav:
+        # Use controller for turning
+        if not self.controller.check_connection():
             self.log("Turn left skipped: MAVLink not connected")
             return False
 
         try:
-            self._ensure_guided_mode()
-
-            # MAV_CMD_CONDITION_YAW: direction 1 = left (counter-clockwise)
-            self.mav.mav.command_long_send(
-                self.mav.target_system,
-                self.mav.target_component,
-                mavutil.mavlink.MAV_CMD_CONDITION_YAW,
-                0,  # confirmation
-                abs(angle_deg),  # param1: target angle
-                abs(turn_speed_deg),  # param2: angular speed
-                1,  # param3: direction (1 = CCW/left, -1 = CW/right)
-                1,  # param4: relative (1 = relative to current heading)
-                0,  # param5-7: unused
-                0,
-                0,
+            # Use controller's send_turn method (negative angle for left)
+            return self.controller.send_turn(
+                angle_deg=-abs(angle_deg),
+                turn_speed_deg=turn_speed_deg
             )
-
-            self.log(f"Turn left {abs(angle_deg)}° @ {turn_speed_deg} dps (relative)")
-            return True
-
         except Exception as exc:
             self.log(f"Turn left failed: {exc}")
             return False
@@ -270,6 +238,27 @@ class MavlinkMotionCommands:
         Returns:
             True if command executed successfully
         """
+        # Use controller for turning
+        if not self.controller.check_connection():
+            self.log("Turn right skipped: MAVLink not connected")
+            return False
+
+        try:
+            # Use controller's send_turn method (positive angle for right)
+            return self.controller.send_turn(
+                angle_deg=abs(angle_deg),
+                turn_speed_deg=turn_speed_deg
+            )
+        except Exception as exc:
+            self.log(f"Turn right failed: {exc}")
+            return False
+
+    def _turn_right_old(
+        self,
+        angle_deg: float,
+        turn_speed_deg: float = 30.0,
+    ) -> bool:
+        """Old implementation - kept for reference."""
         if mavutil is None or not self.mav:
             self.log("Turn right skipped: MAVLink not connected")
             return False
@@ -309,16 +298,14 @@ class MavlinkMotionCommands:
         Returns:
             True if command executed successfully
         """
-        if mavutil is None or not self.mav:
+        # Use controller for stop
+        if not self.controller.check_connection():
             self.log("Stop movement skipped: MAVLink not connected")
             return False
 
         try:
-            # Send zero velocity to stop movement
-            self._send_velocity_target(vx=0.0, vy=0.0, vz=0.0)
-            self.log("Stop movement: zero velocity sent (no disarm)")
-            return True
-
+            # Use controller's send_stop method
+            return self.controller.send_stop()
         except Exception as exc:
             self.log(f"Stop movement failed: {exc}")
             return False

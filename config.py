@@ -21,3 +21,13 @@ DEFAULT_LIDAR_READ_HZ = 8.0
 SIDE_WALL_OFFSET_MM = DEFAULT_BLUE_BOUNDARY_CM * 10  # legacy compatibility
 CART_HALF_MM = SIDE_WALL_OFFSET_MM  # compatibility alias
 
+# GPS speed factor for time-based movement calculation when GPS is unavailable.
+# Formula: time_sec = distance_m * GPS_SPEED_FACTOR
+# This factor represents seconds per meter for dead-reckoning movement.
+GPS_SPEED_FACTOR = 1.5  # seconds per meter (adjust based on vehicle speed characteristics)
+
+# Time-based movement constants for obstacle avoidance (version 75)
+# These values control timed turns and forward movement when GPS/compass are not used
+ROTATION_TIME_SEC = 1.5  # Duration for timed turns (left/right)
+FORWARD_TIME_SEC = 0.8   # Duration for timed forward movement after turns
+SPEED_CAP_PERCENT = 25.0  # Speed percentage cap for obstacle avoidance maneuvers (maps to RC3 = 1250)
