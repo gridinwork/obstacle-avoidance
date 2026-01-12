@@ -1,0 +1,45 @@
+{
+  "move_forward": {
+    "description": "Move the vehicle forward using either distance in meters or time in seconds.",
+    "required": ["speed", "distance_m", "time_s"],
+    "parameters": {
+      "speed": "Forward velocity in m/s.",
+      "distance_m": "Distance in meters (optional if time_s is provided).",
+      "time_s": "Duration in seconds (optional if distance_m is provided)."
+    }
+  },
+
+  "move_backward": {
+    "description": "Move the vehicle backward by using negative MAVLink velocity.",
+    "required": ["speed", "distance_m", "time_s"],
+    "parameters": {
+      "speed": "Backward velocity (positive number).",
+      "distance_m": "Distance in meters.",
+      "time_s": "Duration in seconds."
+    }
+  },
+
+  "turn_left": {
+    "description": "Rotate left around yaw axis by a specified angle.",
+    "required": ["angle_deg", "turn_speed_deg"],
+    "parameters": {
+      "angle_deg": "Angle to rotate, in degrees.",
+      "turn_speed_deg": "Yaw rotation speed in degrees per second."
+    }
+  },
+
+  "turn_right": {
+    "description": "Rotate right around yaw axis by a specified angle.",
+    "required": ["angle_deg", "turn_speed_deg"],
+    "parameters": {
+      "angle_deg": "Angle to rotate, in degrees.",
+      "turn_speed_deg": "Yaw rotation speed in degrees per second."
+    }
+  },
+
+  "stop": {
+    "description": "Stop all motion WITHOUT disarming motors.",
+    "required": [],
+    "parameters": {}
+  }
+}
