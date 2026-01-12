@@ -10,6 +10,7 @@ from lidar_core import MAX_DIST_CM
 from shared_data import Point, SharedData
 
 from .lidar_status_overlay import LidarStatusOverlay
+from .i18n import tr
 
 
 class LidarWidget(QtWidgets.QWidget):
@@ -53,19 +54,19 @@ class LidarWidget(QtWidgets.QWidget):
 
         if not self.shared.show_lidar:
             painter.setPen(QtGui.QPen(QtGui.QColor("#9e9e9e")))
-            painter.drawText(self.rect(), QtCore.Qt.AlignCenter, "LiDAR visualization is off")
+            painter.drawText(self.rect(), QtCore.Qt.AlignCenter, tr("LiDAR visualization is off"))
             painter.restore()
             return
 
         if not self._lidar_ready:
             painter.setPen(QtGui.QPen(QtGui.QColor("#9e9e9e")))
-            painter.drawText(self.rect(), QtCore.Qt.AlignCenter, "LiDAR warming up...")
+            painter.drawText(self.rect(), QtCore.Qt.AlignCenter, tr("LiDAR warming up..."))
             painter.restore()
             return
 
         if not self._points:
             painter.setPen(QtGui.QPen(QtGui.QColor("#9e9e9e")))
-            painter.drawText(self.rect(), QtCore.Qt.AlignCenter, "LiDAR data unavailable")
+            painter.drawText(self.rect(), QtCore.Qt.AlignCenter, tr("LiDAR data unavailable"))
             painter.restore()
             return
 
@@ -233,12 +234,12 @@ class LidarWidget(QtWidgets.QWidget):
             frames_required = max(1, int(self.shared.lidar_read_hz or 1))
         reason = str(getattr(self.shared, "lidar_noise_reason", "") or "")
 
-        lines = [f"LiDAR cluster size: {size}"]
+        lines = [tr("LiDAR cluster size: {size}", size=size)]
         if valid:
-            lines.append("Obstacle cluster validated")
+            lines.append(tr("Obstacle cluster validated"))
         elif reason:
             lines.append(reason)
         else:
-            lines.append("Noise filtered — insufficient points")
-        lines.append(f"Frames stable: {frames_stable} / {max(1, frames_required)} (>=1 sec)")
+            lines.append(tr("Noise filtered — insufficient points"))
+        lines.append(tr("Frames stable: {stable} / {required} (>=1 sec)", stable=frames_stable, required=max(1, frames_required)))
         return lines

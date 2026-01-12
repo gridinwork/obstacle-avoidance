@@ -22,6 +22,7 @@ from shared_data import SharedData
 from utils.camera_manager import CameraManager
 from version import VERSION
 from .lidar_widget import LidarWidget
+from .i18n import tr, set_language, get_language
 
 
 def status_dot(ok: bool, inactive_color: str = "#9e9e9e") -> str:
@@ -39,11 +40,11 @@ def status_text(label: str, state: str | None) -> str:
         "disconnected": "#9e9e9e",
     }
     words = {
-        "connected": "Connected",
-        "error": "Error",
-        "connecting": "Connecting",
-        "not_connected": "Not Connected",
-        "disconnected": "Disconnected",
+        "connected": tr("Connected"),
+        "error": tr("Error"),
+        "connecting": tr("Connecting"),
+        "not_connected": tr("Not Connected"),
+        "disconnected": tr("Disconnected"),
     }
     color = colors.get(state_normalized, "#9e9e9e")
     text = words.get(state_normalized, state_normalized.title())
@@ -52,10 +53,10 @@ def status_text(label: str, state: str | None) -> str:
 
 def _camera_options() -> List[Tuple[str, str]]:
     """Return [(label, value)] for camera devices."""
-    options: List[Tuple[str, str]] = [("Raspberry Pi Camera (libcamera)", "PI_CAMERA")]
+    options: List[Tuple[str, str]] = [(tr("Raspberry Pi Camera (libcamera)"), "PI_CAMERA")]
     for dev in list_camera_devices():
-        options.append((f"USB Camera ({dev})", dev))
-    options.append(("Off", "OFF"))
+        options.append((tr("USB Camera ({dev})", dev=dev), dev))
+    options.append((tr("Off"), "OFF"))
     # Remove duplicates while preserving order
     dedup: List[Tuple[str, str]] = []
     seen = set()
@@ -71,11 +72,11 @@ class SettingsDialog(QtWidgets.QDialog):
     def __init__(self, settings: Settings, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.settings = settings
-        self.setWindowTitle("Settings")
+        self.setWindowTitle(tr("Settings"))
         form = QtWidgets.QFormLayout(self)
 
         # Fixed UART Pixhawk connection
-        self.pixhawk_label = QtWidgets.QLabel("Pixhawk Port: /dev/serial0 (UART)")
+        self.pixhawk_label = QtWidgets.QLabel(tr("Pixhawk Port: /dev/serial0 (UART)"))
         self.pixhawk_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         self.series_combo = QtWidgets.QComboBox()
         self.series_combo.addItems([f"Series {i}" for i in range(0, 6)])
@@ -98,10 +99,10 @@ class SettingsDialog(QtWidgets.QDialog):
         self._refresh_devices()
 
         form.addRow(self.pixhawk_label)
-        form.addRow("Series", self.series_combo)
-        form.addRow("Baudrate", self.baud_spin)
-        form.addRow("LiDAR Port (/dev/ttyUSB*)", self.lidar_port_combo)
-        form.addRow("Camera Selection", self.camera_combo)
+        form.addRow(tr("Series"), self.series_combo)
+        form.addRow(tr("Baudrate"), self.baud_spin)
+        form.addRow(tr("LiDAR Port (/dev/ttyUSB*)"), self.lidar_port_combo)
+        form.addRow(tr("Camera Selection"), self.camera_combo)
 
         btn_box = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel)
         btn_box.accepted.connect(self._save)
@@ -168,7 +169,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.motion = motion
         self.camera_mgr = camera_mgr
         self.lidar = lidar
-        self.setWindowTitle(f"Obstacle Mission {VERSION}")
+        self.setWindowTitle(f"{tr('Obstacle Mission')} {VERSION}")
         self.setMinimumSize(900, 700)
         self.setFocusPolicy(QtCore.Qt.StrongFocus)
         self.setWindowFlags(
@@ -189,7 +190,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Settings tab -------------------------------------------------------
         settings_tab = QtWidgets.QWidget()
-        tab_widget.addTab(settings_tab, "Settings")
+        tab_widget.addTab(settings_tab, tr("Settings"))
 
         main_grid = QtWidgets.QGridLayout(settings_tab)
         main_grid.setContentsMargins(12, 12, 12, 12)
@@ -234,32 +235,32 @@ class MainWindow(QtWidgets.QMainWindow):
         left_layout.setSpacing(10)
 
         controls = QtWidgets.QHBoxLayout()
-        self.btn_auto_mission = QtWidgets.QPushButton("AUTO")
+        self.btn_auto_mission = QtWidgets.QPushButton(tr("AUTO"))
         self.btn_auto_mission.clicked.connect(self._start_mission)
         controls.addWidget(self.btn_auto_mission)
 
-        self.auto_start_chk = QtWidgets.QCheckBox("Start automatically after 5 seconds")
+        self.auto_start_chk = QtWidgets.QCheckBox(tr("Start automatically after 5 seconds"))
         self.auto_start_chk.setChecked(self.settings.auto_start)
         self.auto_start_chk.stateChanged.connect(self._auto_start_changed)
         controls.addWidget(self.auto_start_chk)
 
-        self.btn_settings = QtWidgets.QPushButton("Settings")
+        self.btn_settings = QtWidgets.QPushButton(tr("Settings"))
         self.btn_settings.clicked.connect(self._open_settings)
         controls.addWidget(self.btn_settings)
         controls.addStretch()
         left_layout.addLayout(controls)
 
         device_layout = QtWidgets.QHBoxLayout()
-        self.btn_connect = QtWidgets.QPushButton("START")
+        self.btn_connect = QtWidgets.QPushButton(tr("START"))
         self.btn_connect.clicked.connect(self._start_sequence)
         device_layout.addWidget(self.btn_connect)
-        self.btn_disconnect = QtWidgets.QPushButton("Disconnect Devices")
+        self.btn_disconnect = QtWidgets.QPushButton(tr("Disconnect Devices"))
         self.btn_disconnect.clicked.connect(self._disconnect_devices)
         device_layout.addWidget(self.btn_disconnect)
         self.device_status_labels = {
-            "lidar": QtWidgets.QLabel(status_text("LiDAR", "not_connected")),
-            "mav": QtWidgets.QLabel(status_text("MAVLink", "not_connected")),
-            "camera": QtWidgets.QLabel(status_text("Camera", "not_connected")),
+            "lidar": QtWidgets.QLabel(status_text(tr("LiDAR"), "not_connected")),
+            "mav": QtWidgets.QLabel(status_text(tr("MAVLink"), "not_connected")),
+            "camera": QtWidgets.QLabel(status_text(tr("Camera"), "not_connected")),
         }
         for key in ("lidar", "mav", "camera"):
             self.device_status_labels[key].setTextFormat(QtCore.Qt.RichText)
@@ -267,7 +268,7 @@ class MainWindow(QtWidgets.QMainWindow):
         device_layout.addStretch()
         left_layout.addLayout(device_layout)
 
-        speed_group = QtWidgets.QGroupBox("Speed & Limits")
+        speed_group = QtWidgets.QGroupBox(tr("Speed & Limits"))
         speed_form = QtWidgets.QFormLayout()
         self.speed_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.speed_slider.setMinimum(1000)
@@ -280,7 +281,7 @@ class MainWindow(QtWidgets.QMainWindow):
         speed_box.addWidget(self.speed_label)
         speed_widget = QtWidgets.QWidget()
         speed_widget.setLayout(speed_box)
-        speed_form.addRow("Speed (PWM 1000-2000)", speed_widget)
+        speed_form.addRow(tr("Speed (PWM 1000-2000)"), speed_widget)
 
         self.movement_coefficient = QtWidgets.QDoubleSpinBox()
         self.movement_coefficient.setRange(0.1, 10.0)
@@ -289,7 +290,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.movement_coefficient.setValue(float(self.settings.movement_coefficient))
         self.movement_coefficient.valueChanged.connect(self._movement_coefficient_changed)
         self.movement_coefficient.setFixedWidth(100)
-        speed_form.addRow("Movement Coefficient (sec per meter)", self.movement_coefficient)
+        speed_form.addRow(tr("Movement Coefficient (sec per meter)"), self.movement_coefficient)
 
         self.limit1 = QtWidgets.QSpinBox()
         self.limit1.setRange(20, 400)
@@ -301,12 +302,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.limit2.setValue(self.shared.limit2_cm)
         self.limit2.valueChanged.connect(self._limits_changed)
         self.limit2.setFixedWidth(100)
-        speed_form.addRow("Yellow Zone (cm)", self.limit1)
-        speed_form.addRow("Red Zone (cm)", self.limit2)
+        speed_form.addRow(tr("Yellow Zone (cm)"), self.limit1)
+        speed_form.addRow(tr("Red Zone (cm)"), self.limit2)
         speed_group.setLayout(speed_form)
         left_layout.addWidget(speed_group)
 
-        avoidance_group = QtWidgets.QGroupBox("Avoidance Settings")
+        avoidance_group = QtWidgets.QGroupBox(tr("Avoidance Settings"))
         avoidance_form = QtWidgets.QFormLayout()
         self.avoid_turn = QtWidgets.QSpinBox()
         self.avoid_turn.setRange(30, 180)
@@ -354,16 +355,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.command_cooldown.valueChanged.connect(self._timing_settings_changed)
         self.command_cooldown.setFixedWidth(100)
 
-        avoidance_form.addRow("Turn angle (deg)", self.avoid_turn)
-        avoidance_form.addRow("Travel distance (m)", self.avoid_distance)
-        avoidance_form.addRow("Backoff distance (m)", self.backoff_distance)
-        avoidance_form.addRow("Reverse duration (s)", self.reverse_duration)
-        avoidance_form.addRow("Post-turn lock (s)", self.lock_duration)
-        avoidance_form.addRow("Command/mode cooldown (s)", self.command_cooldown)
+        avoidance_form.addRow(tr("Turn angle (deg)"), self.avoid_turn)
+        avoidance_form.addRow(tr("Travel distance (m)"), self.avoid_distance)
+        avoidance_form.addRow(tr("Backoff distance (m)"), self.backoff_distance)
+        avoidance_form.addRow(tr("Reverse duration (s)"), self.reverse_duration)
+        avoidance_form.addRow(tr("Post-turn lock (s)"), self.lock_duration)
+        avoidance_form.addRow(tr("Command/mode cooldown (s)"), self.command_cooldown)
         avoidance_group.setLayout(avoidance_form)
         left_layout.addWidget(avoidance_group)
 
-        bounds_group = QtWidgets.QGroupBox("LiDAR & Boundaries")
+        bounds_group = QtWidgets.QGroupBox(tr("LiDAR & Boundaries"))
         bounds_form = QtWidgets.QFormLayout()
 
         self.blue_boundary = QtWidgets.QSpinBox()
@@ -393,10 +394,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lidar_rate_spin.valueChanged.connect(self._lidar_config_changed)
         self.lidar_rate_spin.setFixedWidth(100)
 
-        bounds_form.addRow("Blue Boundary Distance (cm)", self.blue_boundary)
-        bounds_form.addRow("Green Boundary Distance (cm)", self.green_boundary)
-        bounds_form.addRow("LiDAR Buffer Size (bytes)", self.lidar_buffer_spin)
-        bounds_form.addRow("LiDAR Read Frequency (Hz)", self.lidar_rate_spin)
+        bounds_form.addRow(tr("Blue Boundary Distance (cm)"), self.blue_boundary)
+        bounds_form.addRow(tr("Green Boundary Distance (cm)"), self.green_boundary)
+        bounds_form.addRow(tr("LiDAR Buffer Size (bytes)"), self.lidar_buffer_spin)
+        bounds_form.addRow(tr("LiDAR Read Frequency (Hz)"), self.lidar_rate_spin)
         bounds_group.setLayout(bounds_form)
         left_layout.addWidget(bounds_group)
         left_layout.addStretch()
@@ -414,18 +415,18 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Visualization tab -------------------------------------------------
         viz_tab = QtWidgets.QWidget()
-        tab_widget.addTab(viz_tab, "Visualization")
+        tab_widget.addTab(viz_tab, tr("Visualization"))
         viz_layout = QtWidgets.QVBoxLayout(viz_tab)
         viz_layout.setContentsMargins(12, 12, 12, 12)
         viz_layout.setSpacing(10)
 
-        self.btn_refresh_lidar = QtWidgets.QPushButton("Refresh LiDAR")
+        self.btn_refresh_lidar = QtWidgets.QPushButton(tr("Refresh LiDAR"))
         self.btn_refresh_lidar.clicked.connect(self._refresh_lidar)
         self.btn_refresh_lidar.setEnabled(False)
 
-        self.btn_start_camera_vis = QtWidgets.QPushButton("Start Camera Visualization")
+        self.btn_start_camera_vis = QtWidgets.QPushButton(tr("Start Camera Visualization"))
         self.btn_start_camera_vis.clicked.connect(self._start_camera_visualization)
-        self.btn_stop_camera_vis = QtWidgets.QPushButton("Stop Camera Visualization")
+        self.btn_stop_camera_vis = QtWidgets.QPushButton(tr("Stop Camera Visualization"))
         self.btn_stop_camera_vis.clicked.connect(self._stop_camera_visualization)
         self.btn_stop_camera_vis.setEnabled(False)
 
@@ -441,20 +442,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.avoidance.statusChanged.connect(self.lidar_view.overlay.set_message)
         self.avoidance.statusChanged.connect(lambda msg: self.lidar_view.update())
 
-        lidar_group = QtWidgets.QGroupBox("LiDAR")
+        lidar_group = QtWidgets.QGroupBox(tr("LiDAR"))
         lidar_layout = QtWidgets.QVBoxLayout(lidar_group)
         lidar_layout.addWidget(self.lidar_view, 1)
         lidar_group.setMinimumWidth(700)
         lidar_group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
 
-        self.camera_label = QtWidgets.QLabel("Camera feed is off")
+        self.camera_label = QtWidgets.QLabel(tr("Camera feed is off"))
         self.camera_label.setAlignment(QtCore.Qt.AlignCenter)
         self.camera_label.setWordWrap(True)
         self.camera_label.setFixedSize(640, 480)
         self.camera_label.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         self.camera_label.setStyleSheet("background-color: #0d1117; color: #9e9e9e; border: 1px solid #222;")
 
-        camera_group = QtWidgets.QGroupBox("Camera")
+        camera_group = QtWidgets.QGroupBox(tr("Camera"))
         camera_layout = QtWidgets.QVBoxLayout(camera_group)
         camera_layout.setAlignment(QtCore.Qt.AlignCenter)
         camera_layout.addWidget(self.camera_label, 0, QtCore.Qt.AlignCenter)
@@ -594,14 +595,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 camera_mode="OFF",
                 camera_source="OFF",
                 camera_device="OFF",
-                status_message="Camera disabled",
+                status_message=tr("Camera disabled"),
                 camera_status="not_connected",
                 camera_connected=False,
             )
             self.shared.set_camera_frame(None)
             self.camera_mgr.stop(keep_flags=True)
             self.camera_label.setPixmap(QtGui.QPixmap())
-            self.camera_label.setText("Camera feed is off")
+            self.camera_label.setText(tr("Camera feed is off"))
             return
 
         self.camera_label.setPixmap(QtGui.QPixmap())
@@ -625,7 +626,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_connect.setEnabled(False)
         self.btn_disconnect.setEnabled(False)
         self.shared.update_status(
-            status_message="Starting devices...",
+            status_message=tr("Starting devices..."),
             show_lidar=False,
             show_camera=False,
             visualization_running=False,
@@ -644,7 +645,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
         success = bool(lidar_ok or camera_ok or self.shared.mav_connected)
-        status_msg = "Devices connected, initializing..." if success else "Device connection failed"
+        status_msg = tr("Devices connected, initializing...") if success else tr("Device connection failed")
 
         self._pending_status_msg = status_msg
         self._start_success = success
@@ -680,16 +681,16 @@ class MainWindow(QtWidgets.QMainWindow):
         if started:
             self.shared.update_status(lidar_status="connected", visualization_running=True)
         else:
-            self.shared.update_status(show_lidar=False, visualization_running=False, status_message="LiDAR stream failed")
+            self.shared.update_status(show_lidar=False, visualization_running=False, status_message=tr("LiDAR stream failed"))
         self._viz_allowed = True
         self.btn_refresh_lidar.setEnabled(bool(started))
         self.lidar_view.update()
-        self.shared.update_status(status_message="Devices ready")
+        self.shared.update_status(status_message=tr("Devices ready"))
 
     def _disconnect_devices(self) -> None:
         self.btn_connect.setEnabled(False)
         self.btn_disconnect.setEnabled(False)
-        self.shared.update_status(status_message="Disconnecting devices...")
+        self.shared.update_status(status_message=tr("Disconnecting devices..."))
         threading.Thread(target=self._disconnect_devices_worker, daemon=True).start()
 
     def _disconnect_devices_worker(self) -> None:
@@ -724,7 +725,7 @@ class MainWindow(QtWidgets.QMainWindow):
             lidar_status="disconnected",
             mav_status="disconnected",
             camera_status="disconnected",
-            status_message="Devices disconnected",
+            status_message=tr("Devices disconnected"),
         )
         QtCore.QMetaObject.invokeMethod(self, "_on_disconnect_finished", QtCore.Qt.QueuedConnection)
 
@@ -736,19 +737,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_start_camera_vis.setEnabled(True)
         self.btn_stop_camera_vis.setEnabled(False)
         self.camera_label.setPixmap(QtGui.QPixmap())
-        self.camera_label.setText("Camera disconnected")
+        self.camera_label.setText(tr("Camera disconnected"))
         self.lidar_view.overlay.clear()
         self.lidar_view.update()
 
     def _refresh_lidar(self) -> None:
         """Clear buffers and restart LiDAR stream."""
         if not self._viz_allowed:
-            self.shared.update_status(status_message="Visualization locked — press START")
+            self.shared.update_status(status_message=tr("Visualization locked — press START"))
             return
         if not self.shared.lidar_connected:
             connected = self.lidar.connect()
             if not connected:
-                self.shared.update_status(status_message="LiDAR not connected")
+                self.shared.update_status(status_message=tr("LiDAR not connected"))
                 return
         try:
             self.lidar.stop_stream(keep_connection=True)
@@ -759,15 +760,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.shared.clear_lidar_ready()
         started = self.lidar.start_stream()
         if started:
-            self.shared.update_status(lidar_status="connected", show_lidar=True, status_message="LiDAR refreshed")
+            self.shared.update_status(lidar_status="connected", show_lidar=True, status_message=tr("LiDAR refreshed"))
         else:
-            self.shared.update_status(status_message="LiDAR refresh failed", show_lidar=False)
+            self.shared.update_status(status_message=tr("LiDAR refresh failed"), show_lidar=False)
         self.lidar_view.overlay.clear()
         self.lidar_view.update()
 
     def _start_camera_visualization(self) -> None:
         if not self._viz_allowed:
-            self.shared.update_status(status_message="Visualization locked — press START")
+            self.shared.update_status(status_message=tr("Visualization locked — press START"))
             return
         device = self._camera_device_from_settings()
         if not device or device.upper() == "OFF":
@@ -776,10 +777,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 show_camera=False,
                 camera_connected=False,
                 visualization_running=self.shared.show_lidar,
-                status_message="Select camera device in Settings",
+                status_message=tr("Select camera device in Settings"),
             )
             self.camera_label.setPixmap(QtGui.QPixmap())
-            self.camera_label.setText("Camera feed is off")
+            self.camera_label.setText(tr("Camera feed is off"))
             return
         self.shared.update_status(show_camera=True)
         self.settings.set("show_camera", True)
@@ -792,44 +793,44 @@ class MainWindow(QtWidgets.QMainWindow):
         self.shared.update_status(
             show_camera=False,
             visualization_running=self.shared.show_lidar,
-            status_message="Camera visualization stopped",
+            status_message=tr("Camera visualization stopped"),
         )
         self.settings.set("show_camera", False)
         self.camera_label.setPixmap(QtGui.QPixmap())
-        self.camera_label.setText("Camera visualization stopped (device remains connected)")
+        self.camera_label.setText(tr("Camera visualization stopped (device remains connected)"))
 
     def _update_camera_view(self) -> None:
         if not self._viz_allowed:
             self.camera_label.setPixmap(QtGui.QPixmap())
-            self.camera_label.setText("Visualization locked — press START")
+            self.camera_label.setText(tr("Visualization locked — press START"))
             return
         if not self.shared.show_camera:
             self.camera_label.setPixmap(QtGui.QPixmap())
-            self.camera_label.setText("Camera visualization stopped")
+            self.camera_label.setText(tr("Camera visualization stopped"))
             return
         device = self._camera_device_from_settings()
         if device.upper() == "OFF":
             self.camera_label.setPixmap(QtGui.QPixmap())
-            self.camera_label.setText("Camera disabled in Settings")
+            self.camera_label.setText(tr("Camera disabled in Settings"))
             return
         if self.shared.camera_status == "connecting":
             self.camera_label.setPixmap(QtGui.QPixmap())
-            self.camera_label.setText(f"Opening camera ({device})...")
+            self.camera_label.setText(tr("Opening camera ({device})...", device=device))
             return
         if not self.shared.camera_connected:
             self.camera_label.setPixmap(QtGui.QPixmap())
-            self.camera_label.setText("Camera feed unavailable")
+            self.camera_label.setText(tr("Camera feed unavailable"))
             return
         frame = self.shared.get_camera_frame()
         if frame is None:
             self.camera_label.setPixmap(QtGui.QPixmap())
-            self.camera_label.setText("Camera feed unavailable")
+            self.camera_label.setText(tr("Camera feed unavailable"))
             return
         try:
             height, width, _ = frame.shape
         except Exception:
             self.camera_label.setPixmap(QtGui.QPixmap())
-            self.camera_label.setText("Camera frame invalid")
+            self.camera_label.setText(tr("Camera frame invalid"))
             return
         image = QtGui.QImage(frame.data, width, height, 3 * width, QtGui.QImage.Format_RGB888)
         pixmap = QtGui.QPixmap.fromImage(image).scaled(
@@ -860,13 +861,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _refresh_status(self) -> None:
         s = self.shared
-        self.status_labels["mav"].setText(f"MAVLink {status_dot(s.mav_connected)}")
-        self.status_labels["lidar"].setText(f"LiDAR {status_dot(s.lidar_active)}")
-        self.status_labels["mission"].setText(f"Mission {status_dot(s.mission_active)}")
-        self.status_labels["avoidance"].setText(f"Avoidance {status_dot(s.avoidance_enabled)}")
-        self.device_status_labels["lidar"].setText(status_text("LiDAR", s.lidar_status))
-        self.device_status_labels["mav"].setText(status_text("MAVLink", s.mav_status))
-        self.device_status_labels["camera"].setText(status_text("Camera", s.camera_status))
+        self.status_labels["mav"].setText(f"{tr('MAVLink')} {status_dot(s.mav_connected)}")
+        self.status_labels["lidar"].setText(f"{tr('LiDAR')} {status_dot(s.lidar_active)}")
+        self.status_labels["mission"].setText(f"{tr('Mission')} {status_dot(s.mission_active)}")
+        self.status_labels["avoidance"].setText(f"{tr('Avoidance')} {status_dot(s.avoidance_enabled)}")
+        self.device_status_labels["lidar"].setText(status_text(tr("LiDAR"), s.lidar_status))
+        self.device_status_labels["mav"].setText(status_text(tr("MAVLink"), s.mav_status))
+        self.device_status_labels["camera"].setText(status_text(tr("Camera"), s.camera_status))
         self.device_status_labels["lidar"].setToolTip(s.lidar_error or "")
         self.device_status_labels["mav"].setToolTip(s.mav_error or "")
         self.device_status_labels["camera"].setToolTip(s.camera_error or "")
