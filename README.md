@@ -2,6 +2,8 @@
 
 **Версия 74-RU (Русский интерфейс)**
 
+[![Watch the demo video](https://img.youtube.com/vi/4OooUVU1wcw/0.jpg)](https://www.youtube.com/watch?v=4OooUVU1wcw)
+
 > **Примечание:** Доступны две версии:
 > - **74-RU** - Русский интерфейс (текущая версия)
 > - **74-EN** - Английский интерфейс (предыдущая версия)
